@@ -5,13 +5,13 @@ CREATE SCHEMA test;
 
 CREATE TABLE test.articles (
     id BIGINT PRIMARY KEY NOT NULL, --could be string to be extensible
-    name CITEXT UNIQUE NOT NULL, --creates unique index
+    art_name CITEXT UNIQUE NOT NULL, --creates unique index
     stock BIGINT NOT NULL
 );
 
 CREATE TABLE test.products (
     id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-    name CITEXT UNIQUE NOT NULL --creates unique index
+    prd_name CITEXT UNIQUE NOT NULL --creates unique index
 );
 
 CREATE TABLE test.products_articles (
@@ -25,14 +25,14 @@ DROP TABLE test.products_articles;
 DROP TABLE test.articles;
 DROP TABLE test.products;
 
-INSERT INTO test.articles (id,name,stock)
+INSERT INTO test.articles (id,art_name,stock)
 VALUES
     (1,'test_article',4),
     (2,'shoes',2);
 
 SELECT * FROM test.articles;
 
-INSERT INTO test.products (name)
+INSERT INTO test.products (prd_name)
 VALUES
     ('gift_box_1'),
     ('gift_box_2'),
@@ -45,9 +45,9 @@ VALUES (1,1,5), (1,2,2);
 
 SELECT * FROM test.products_articles;
 
-SELECT p.name, a.name, pa.qty
+SELECT p.id, p.prd_name, a.art_name, pa.qty
 FROM test.products as p
 INNER JOIN test.products_articles as pa
     ON pa.product_id = p.id 
 INNER JOIN test.articles as a
-    ON pa.article_id = a.id;
+    ON pa.article_id = a.id

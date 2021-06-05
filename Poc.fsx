@@ -1,18 +1,12 @@
-open System.Data
-open System.Data.Common
 #r "nuget:Npgsql"
 #r "nuget:Npgsql.FSharp"
 #r "nuget:FSharp.Data"
-#r "nuget:Dapper.FSharp"
 #r "nuget:Suave"
 
 open FSharp.Data
-open Suave
-open Suave.Filters
-open Suave.Operators
-open Suave.Successful
+open FSharp.Core
+open Npgsql
 open Npgsql.FSharp
-open System.ComponentModel.DataAnnotations.Schema
 
 module Constants =
     [<Literal>]
@@ -28,21 +22,24 @@ module Constants =
 //sensitive data should be injected from environment
 System.Environment.SetEnvironmentVariable("DATABASE_CONNECTION_STRING", Constants.sqlDevConnection)
 
-module Dtos = 
+module ProvidedTypes =
+    //open FSharp.Data.Npgsql
     type Inventory = JsonProvider<Constants.inventoryJson>
     type Products = JsonProvider<Constants.productsJson>
+    //type NpgsqlProvider = NpgsqlConnection<Constants.sqlDevConnection>
+
+module Dtos = 
+    open ProvidedTypes
 
     type Article = Inventory.Inventory
-
     type Product = Products.Product
-
     type ArticleQuantity = Products.ContainArticle
 
 module Domain =
     type Article = { 
-        [<ColumnAttribute("id")>] Id : int ; 
-        [<ColumnAttribute("name")>] Name: string; 
-        [<ColumnAttribute("stock")>] Stock: int 
+            Id : int ; 
+            Name: string; 
+            Stock: int 
         } 
         with member this.ToDto() = 
                 Dtos.Article(this.Id, this.Name, this.Stock)
@@ -52,20 +49,85 @@ module Domain =
                 { Id = dto.ArtId; Name = dto.Name; Stock = dto.Stock } 
 
     type ArticleQuantity = {
-        [<ColumnAttribute("id")>]Id: int; 
-        [<ColumnAttribute("qty")>]Qty: int 
+            Id: int; 
+            Qty: int 
         } 
 
     type Product = { 
-        [<ColumnAttribute("id")>] Id : int ; 
-        [<ColumnAttribute("name")>] Name: string; 
-        [<ColumnAttribute("articles")>] Articles : ArticleQuantity array }
+            Id : int ; 
+            Name: string; 
+            Articles : ArticleQuantity list }
         with member this.ToDto() = 
                 let articles = 
                     this.Articles 
-                    |> Array.map (fun a -> Dtos.Products.ContainArticle(a.Id, a.Qty))
+                    |> Seq.map (fun a -> Dtos.ArticleQuantity(a.Id, a.Qty))
+                    |> Array.ofSeq
                 Dtos.Product(this.Name, articles)
 
+module Data =
+    open ProvidedTypes
+    open Domain
+
+    module Queries =
+
+        [<Literal>]
+        let getArticles =
+            "SELECT h FROM test.articles"
+
+        [<Literal>]
+        let getProducts =
+            "SELECT \n    \
+                p.id, p.prd_name, a.art_name, pa.qty \n\
+            FROM test.products as p \n\
+            INNER JOIN test.products_articles as pa \n   \
+                ON pa.product_id = p.id \n\
+            INNER JOIN test.articles as a \n   \
+                ON pa.article_id = a.id"
+
+    let getConnectionString () =
+        System.Environment.GetEnvironmentVariable "DATABASE_CONNECTION_STRING"
+
+    let getArticles () =
+        getConnectionString()
+        |> Sql.connect
+        |> Sql.query Queries.getArticles
+        |> Sql.execute (fun read ->
+            {
+                Id = read.int "id"
+                Name = read.text "art_name"
+                Stock = read.int "stock"
+            })
+
+    let getProducts () : Product seq =
+        getConnectionString()
+        |> Sql.connect
+        |> Sql.query Queries.getProducts
+        |> Sql.execute (fun read ->
+            let id = read.int "id"
+            { 
+                    Id = id; 
+                    Name =  read.text "prd_name"; 
+                    Articles = [ {  
+                            Id = read.int "id"; 
+                            Qty = read.int "qty" 
+                        } ]
+            }    
+        )
+        |> Seq.groupBy (fun p -> p.Id)
+        |> Seq.map (fun (pid,productLines) ->
+            let product = productLines |> Seq.head
+            { product with Articles = 
+                productLines 
+                |> Seq.collect (fun p -> p.Articles ) 
+                |> Seq.toList
+            }
+        )
+
+
+open Suave
+open Suave.Filters
+open Suave.Operators
+open Suave.Successful
 
 module Utils =
 
@@ -85,45 +147,16 @@ module Utils =
             fromWrapped(r)
         |Error(e) -> ServerErrors.INTERNAL_ERROR(e)
 
-module Data =
-    open Npgsql
-    open Dapper.FSharp
-    open Dapper.FSharp.PostgreSQL
-
-    Dapper.FSharp.OptionTypes.register()
-
-    let getConnection () =
-        let connectionString = System.Environment.GetEnvironmentVariable "DATABASE_CONNECTION_STRING"
-        new NpgsqlConnection(connectionString)
-
-    let getArticles () =
-        select {
-            table "test.articles"
-            orderBy "test.articles.name" Asc
-        } 
-        |> getConnection().SelectAsync<Domain.Article>
-        |> Async.AwaitTask
-
-    let getProducts () =
-        select {
-            table "test.products"
-            innerJoin "test.products_articles" "product_id" "test.products.id"
-            innerJoin "test.articles" "id" "test.products_articles.article_id"
-            orderBy "Persons.Position" Asc
-        } 
-        |> getConnection().SelectAsync<Domain.Product>
-        |> Async.AwaitTask
-
 
 module Services = 
     let getArticles (httpRequest : HttpRequest) = 
 
         //todo: load from db and map from dto
         Data.getArticles()
-        |> Async.RunSynchronously
+        //|> Async.RunSynchronously
         |> Seq.map (fun x -> x.ToDto())
         |> Seq.toArray
-        |> fun x -> Dtos.Inventory.Root(x)
+        |> fun x -> ProvidedTypes.Inventory.Root(x)
         |> Some
         |> Ok
         |> Utils.FromRes(Utils.FromOption(fun x -> x.JsonValue.ToString()))
@@ -132,7 +165,7 @@ module Services =
         let newInventoryDto =
             httpRequest.rawForm
             |> System.Text.Encoding.UTF8.GetString
-            |> Dtos.Inventory.Parse
+            |> ProvidedTypes.Inventory.Parse
             
         let domainArticles = 
             newInventoryDto
