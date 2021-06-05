@@ -1,19 +1,16 @@
-#r "nuget:Npgsql"
 #r "nuget:Npgsql.FSharp"
 #r "nuget:FSharp.Data"
 #r "nuget:Suave"
 
 open FSharp.Data
 open FSharp.Core
-open Npgsql
-open Npgsql.FSharp
 
 module Constants =
     [<Literal>]
-    let inventoryJson = __SOURCE_DIRECTORY__ + "/inventory.json"
+    let inventoryJson = __SOURCE_DIRECTORY__ + "/../inventory.json"
 
     [<Literal>]
-    let productsJson = __SOURCE_DIRECTORY__ + "/products.json"
+    let productsJson = __SOURCE_DIRECTORY__ + "/../products.json"
 
     [<Literal>]
     let sqlDevConnection = "Host=localhost;Database=postgres;Username=postgres;Password=password"
@@ -24,16 +21,18 @@ System.Environment.SetEnvironmentVariable("DATABASE_CONNECTION_STRING", Constant
 
 module ProvidedTypes =
     //open FSharp.Data.Npgsql
-    type Inventory = JsonProvider<Constants.inventoryJson>
-    type Products = JsonProvider<Constants.productsJson>
+    type InventoryProvider = JsonProvider<Constants.inventoryJson>
+    type ProductsProvider = JsonProvider<Constants.productsJson>
     //type NpgsqlProvider = NpgsqlConnection<Constants.sqlDevConnection>
 
 module Dtos = 
     open ProvidedTypes
 
-    type Article = Inventory.Inventory
-    type Product = Products.Product
-    type ArticleQuantity = Products.ContainArticle
+    type Inventory = InventoryProvider.Root
+    type Article = InventoryProvider.Inventory
+    type Products = ProductsProvider.Root
+    type Product = ProductsProvider.Product
+    type ArticleQuantity = ProductsProvider.ContainArticle
 
 module Domain =
     type Article = { 
@@ -67,12 +66,14 @@ module Domain =
 module Data =
     open ProvidedTypes
     open Domain
+    open Npgsql.FSharp
 
     module Queries =
 
         [<Literal>]
         let getArticles =
-            "SELECT h FROM test.articles"
+            "SELECT x \n\
+            FROM test.articles"
 
         [<Literal>]
         let getProducts =
@@ -98,8 +99,8 @@ module Data =
                 Stock = read.int "stock"
             })
 
-    let getProducts () : Product seq =
-        getConnectionString()
+    let getProducts () : Product list =
+         getConnectionString()
         |> Sql.connect
         |> Sql.query Queries.getProducts
         |> Sql.execute (fun read ->
@@ -113,13 +114,14 @@ module Data =
                         } ]
             }    
         )
-        |> Seq.groupBy (fun p -> p.Id)
-        |> Seq.map (fun (pid,productLines) ->
-            let product = productLines |> Seq.head
-            { product with Articles = 
-                productLines 
-                |> Seq.collect (fun p -> p.Articles ) 
-                |> Seq.toList
+        |> List.groupBy (fun p -> p.Id)
+        |> List.map (fun (pid,productLines) ->
+            let product = productLines |> List.head
+
+            { 
+                product with Articles = 
+                    productLines 
+                    |> List.collect (fun p -> p.Articles ) 
             }
         )
 
@@ -150,13 +152,36 @@ module Utils =
 
 module Services = 
     let getArticles (httpRequest : HttpRequest) = 
-
-        //todo: load from db and map from dto
         Data.getArticles()
         //|> Async.RunSynchronously
         |> Seq.map (fun x -> x.ToDto())
         |> Seq.toArray
-        |> fun x -> ProvidedTypes.Inventory.Root(x)
+        |> fun x -> Dtos.Inventory(x)
+        |> Some
+        |> Ok
+        |> Utils.FromRes(Utils.FromOption(fun x -> x.JsonValue.ToString()))
+
+    let getProducts (httpRequest : HttpRequest) = 
+        Data.getProducts()
+        //|> Async.RunSynchronously
+        |> Seq.map (fun x -> x.ToDto())
+        |> Seq.toArray
+        |> fun x -> Dtos.Products(x)
+        |> Some
+        |> Ok
+        |> Utils.FromRes(Utils.FromOption(fun x -> x.JsonValue.ToString()))
+
+    let sellProduct (httpRequest : HttpRequest) = 
+        let productDto : Dtos.Products =
+            httpRequest.rawForm
+            |> System.Text.Encoding.UTF8.GetString
+            |> ProvidedTypes.ProductsProvider.Parse
+
+        Data.getProducts()
+        //|> Async.RunSynchronously
+        |> Seq.map (fun x -> x.ToDto())
+        |> Seq.toArray
+        |> fun x -> Dtos.Products(x)
         |> Some
         |> Ok
         |> Utils.FromRes(Utils.FromOption(fun x -> x.JsonValue.ToString()))
@@ -165,7 +190,7 @@ module Services =
         let newInventoryDto =
             httpRequest.rawForm
             |> System.Text.Encoding.UTF8.GetString
-            |> ProvidedTypes.Inventory.Parse
+            |> ProvidedTypes.InventoryProvider.Parse
             
         let domainArticles = 
             newInventoryDto
@@ -186,7 +211,7 @@ module Controllers =
 
     let productsController : WebPart = 
         path "/products" >=> choose [
-          GET  >=> request (fun r -> ServerErrors.NOT_IMPLEMENTED("ouch"))
+          GET  >=> request  Services.getProducts
           POST >=> request (fun r -> ServerErrors.NOT_IMPLEMENTED("ouch"))
         ]
 
