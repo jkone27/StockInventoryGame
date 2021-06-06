@@ -130,7 +130,7 @@ module Domain =
                     Error("there should be at least one article")
 
 [<Literal>]
-let getArticlesQuery = """SELECT x FROM test.articles"""
+let getArticlesQuery = """SELECT id, art_name, stock FROM test.articles"""
 
 [<Literal>]
 let getProductsQuery =
@@ -170,17 +170,25 @@ let setProductStatusToSoldQuery =
 
 [<Literal>]
 let insertArticleQuery =
-    "INSERT INTO test.articles(id, art_name, stock) VALUES(@id,@art_name,@stock)"
+    "INSERT INTO test.articles(id, art_name, stock) VALUES(@id,@art_name,@stock) RETURNING *"
 
 [<Literal>]
 let insertProductQuery =
-    "INSERT INTO test.products(prd_name, is_sold) VALUES(@prd_name,@is_sold)"
+    "INSERT INTO test.products (prd_name, is_sold)
+     VALUES (@prd_name, false) RETURNING id as newprd_id"
 
+//they go together, the second line is repeated multiple times
+[<Literal>]
+let insertProductLineQuery =
+    "INSERT INTO test.products_articles(product_id, article_id, qty) 
+     VALUES (@prd_id, @art_id, @qty)"
 
 
 module Data =
     open Domain
+    open Npgsql
     open Npgsql.FSharp
+    open System.Transactions
 
     let getConnectionString () =
         "Host=localhost;Database=postgres;Username=postgres;Password=password"
@@ -319,28 +327,44 @@ module Data =
     /// transactional
     let tryAddProducts (products: Product list) =
 
-        // This query is executed n times in a single sql script
-        let addProductsT =
-            let executions =
-                products
-                |> List.map (fun p -> 
-                    [ 
-                        "@prd_name", Sql.text p.Name
-                        "@is_sold", Sql.bool false
-                    ]
-                ) 
-            insertProductQuery, executions
-
         try
-            getConnectionString()
-            |> Sql.connect
-            |> Sql.executeTransaction 
-                [
-                    addProductsT
-                ]
-            |> fun x -> x.Length //affected rows
-            |> Ok
+            use scope = new TransactionScope()
+            use connection = new NpgsqlConnection(getConnectionString())
+            connection.Open()
 
+            let affected = new ResizeArray<int64>()
+            for product in products do
+                let newProductId = 
+                    connection
+                    |> Sql.existingConnection
+                    |> Sql.query insertProductQuery
+                    |> Sql.parameters [ "@prd_name", Sql.text product.Name ]
+                    |> Sql.execute(fun read -> read.int64 "newprd_id")
+                    |> Seq.head
+
+
+                let productLines = products |> List.collect (fun p -> p.Articles)
+
+                for line in productLines do
+                    connection
+                    |> Sql.existingConnection
+                    |> Sql.query insertProductLineQuery
+                    |> Sql.parameters 
+                        [ 
+                            ("@prd_id", Sql.int64 newProductId)
+                            ("@art_id", Sql.int64 (line.Id |> int64))
+                            ("@qty", Sql.int line.Qty)
+                        ]
+                    |> Sql.executeNonQuery
+                    |> ignore
+
+                affected.Add(newProductId) |> ignore
+
+            if affected.Count <> products.Length then
+                failwith($"update partially failed, rolling back")
+            else
+                scope.Complete()
+                Ok(products.Length)
         with ex ->
             Error(ex.Message)
 
@@ -474,6 +498,12 @@ module Services =
                 |> Seq.map (fun x -> x.getOk)
                 |> Seq.choose id
                 |> Seq.toList
+
+            // let requiredArticles =
+            //     productsList
+            //     |> List.collect (fun p -> p.Articles)
+            //     |> List.map (fun a -> a.Id)
+            //     |> Seq.ofList //merge dups
 
             Data.tryAddProducts(productsList)
             |> Utils.FromRes (fun r -> 

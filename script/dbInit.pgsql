@@ -55,7 +55,18 @@ SELECT * FROM test.products_articles;
 
 SELECT p.id, p.prd_name, a.art_name, pa.qty, p.is_sold
 FROM test.products as p
-INNER JOIN test.products_articles as pa
+LEFT JOIN test.products_articles as pa
     ON pa.product_id = p.id 
-INNER JOIN test.articles as a
-    ON pa.article_id = a.id
+LEFT JOIN test.articles as a
+    ON pa.article_id = a.id;
+
+
+
+
+INSERT INTO test.products(prd_name)
+VALUES ('test-select') RETURNING id;
+
+
+DELETE FROM test.products_articles;
+DELETE FROM test.articles;
+DELETE FROM test.products;
