@@ -6,18 +6,19 @@ CREATE SCHEMA test;
 CREATE TABLE test.articles (
     id BIGINT PRIMARY KEY NOT NULL, --could be string to be extensible
     art_name CITEXT UNIQUE NOT NULL, --creates unique index
-    stock BIGINT NOT NULL
+    stock BIGINT NOT NULL CHECK (stock >= 0)
 );
 
 CREATE TABLE test.products (
     id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    is_sold BOOLEAN NOT NULL DEFAULT false, --to archive sold products (we dont want to delete them from DB)
     prd_name CITEXT UNIQUE NOT NULL --creates unique index
 );
 
 CREATE TABLE test.products_articles (
     product_id BIGINT REFERENCES test.products(id) ON UPDATE CASCADE,
     article_id BIGINT REFERENCES test.articles(id) ON UPDATE CASCADE,
-    qty INT NOT NULL,
+    qty INT NOT NULL CHECK (qty >= 0),
     PRIMARY KEY(product_id,article_id)
 );
 
@@ -29,6 +30,10 @@ INSERT INTO test.articles (id,art_name,stock)
 VALUES
     (1,'test_article',4),
     (2,'shoes',2);
+
+INSERT INTO test.articles (id,art_name,stock)
+VALUES
+    (1,'test_article',-1); --check validation
 
 SELECT * FROM test.articles;
 
@@ -43,9 +48,12 @@ SELECT * FROM test.products;
 INSERT INTO test.products_articles(product_id, article_id, qty)
 VALUES (1,1,5), (1,2,2);
 
+INSERT INTO test.products_articles(product_id, article_id, qty)
+VALUES (1,1,-1); --check validation
+
 SELECT * FROM test.products_articles;
 
-SELECT p.id, p.prd_name, a.art_name, pa.qty
+SELECT p.id, p.prd_name, a.art_name, pa.qty, p.is_sold
 FROM test.products as p
 INNER JOIN test.products_articles as pa
     ON pa.product_id = p.id 

@@ -22,7 +22,7 @@ The products should also be loaded from a file, see the attached products.json.
 
 The warehouse should have at least the following functionality:
 
-* Get all products and quantity of each that is an available with the current inventory
+* Get all products and quantity of each that is an available with the current inventory (OK)
 * Remove(Sell) a product and update the inventory accordingly
 
 ## A traditional approach (Transactional DB)
