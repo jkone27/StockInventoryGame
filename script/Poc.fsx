@@ -5,7 +5,6 @@
 open FSharp.Data
 open System
 open System.Text
-open System.Text.Encoding
 
 module Constants =
     [<Literal>]
@@ -130,60 +129,67 @@ module Domain =
                 else
                     Error("there should be at least one article")
 
+[<Literal>]
+let getArticlesQuery = """SELECT x FROM test.articles"""
+
+[<Literal>]
+let getProductsQuery =
+    """SELECT
+        p.id, p.prd_name, a.art_name, pa.qty
+    FROM test.products as p
+    INNER JOIN test.products_articles as pa
+        ON pa.product_id = p.id
+    INNER JOIN test.articles as a
+        ON pa.article_id = a.id"""
+
+[<Literal>]
+let getProductByNameQuery = 
+    """SELECT
+        p.id, p.prd_name, a.art_name, pa.qty
+    FROM test.products as p
+    INNER JOIN test.products_articles as pa
+        ON pa.product_id = p.id
+    INNER JOIN test.articles as a
+        ON pa.article_id = a.id
+    WHERE p.prd_name = @prd_name"""
+
+[<Literal>]
+let updateArticleQuery =
+    """UPDATE a 
+    SET a.stock = (a.stock - @qty)
+    FROM test.articles a
+    WHERE a.id = @art_id
+    """
+
+[<Literal>]
+let setProductStatusToSoldQuery =
+    """UPDATE test.products
+    SET is_sold = true 
+    WHERE prd_id = @prd_id
+    """
+
+[<Literal>]
+let insertArticleQuery =
+    "INSERT INTO test.articles(id, art_name, stock) VALUES(@id,@art_name,@stock)"
+
+[<Literal>]
+let insertProductQuery =
+    "INSERT INTO test.products(prd_name, is_sold) VALUES(@prd_name,@is_sold)"
+
+
+
 module Data =
     open Domain
     open Npgsql.FSharp
 
-    module Queries =
-
-        [<Literal>]
-        let getArticles =
-            """SELECT x
-            FROM test.articles"""
-
-        [<Literal>]
-        let getProducts =
-            """SELECT
-                p.id, p.prd_name, a.art_name, pa.qty
-            FROM test.products as p
-            INNER JOIN test.products_articles as pa
-                ON pa.product_id = p.id
-            INNER JOIN test.articles as a
-                ON pa.article_id = a.id"""
-
-        [<Literal>]
-        let getProductByName = 
-            """SELECT
-                p.id, p.prd_name, a.art_name, pa.qty
-            FROM test.products as p
-            INNER JOIN test.products_articles as pa
-                ON pa.product_id = p.id
-            INNER JOIN test.articles as a
-                ON pa.article_id = a.id
-            WHERE p.prd_name = @prd_name"""
-
-        [<Literal>]
-        let updateArticle =
-            """UPDATE a 
-            SET a.stock = (a.stock - @qty)
-            FROM test.articles a
-            WHERE a.id = @art_id
-            """
-
-        [<Literal>]
-        let setProductStatusToSold =
-            """UPDATE test.products
-            SET is_sold = true 
-            WHERE prd_id = @prd_id
-            """
-
     let getConnectionString () =
-        System.Environment.GetEnvironmentVariable "DATABASE_CONNECTION_STRING"
+        "Host=localhost;Database=postgres;Username=postgres;Password=password"
+        //System.Environment.GetEnvironmentVariable "DATABASE_CONNECTION_STRING"
 
     let getArticles () =
         getConnectionString()
         |> Sql.connect
-        |> Sql.query Queries.getArticles
+        |> Sql.query getArticlesQuery
         |> Sql.execute (fun read ->
             {
                 Id = read.int "id"
@@ -192,9 +198,9 @@ module Data =
             })
 
     let getProducts () =
-         getConnectionString()
+        getConnectionString()
         |> Sql.connect
-        |> Sql.query Queries.getProducts
+        |> Sql.query getProductsQuery
         |> Sql.execute (fun read ->
             let id = read.int "id"
             
@@ -219,7 +225,7 @@ module Data =
     let getProductByName productName =
          getConnectionString()
         |> Sql.connect
-        |> Sql.query Queries.getProductByName
+        |> Sql.query getProductByNameQuery
         |> Sql.parameters [ "@prd_name", Sql.text productName ]
         |> Sql.execute (fun read ->
             let id = read.int "id"
@@ -260,10 +266,10 @@ module Data =
                         "@art_id", Sql.int64 (a.Id |> int64) 
                     ]
                 ) 
-            Queries.updateArticle, executions
+            updateArticleQuery, executions
 
         let updateProductStatusT =
-            Queries.setProductStatusToSold, [ 
+            setProductStatusToSoldQuery, [ 
                 [ "@prd_id", Sql.int64 (product.Id |> int64) ] 
             ]
 
@@ -281,33 +287,28 @@ module Data =
         with ex ->
             Error(ex.Message)
 
-    /// transactional update of inventory and product
+    /// transactional
     let tryAddArticles (articles: Article list) =
 
         // This query is executed n times in a single sql script
-        let updateArticlesT =
+        let addArticlesT =
             let executions =
-                product.Articles 
+                articles
                 |> List.map (fun a -> 
                     [ 
-                        "@qty", Sql.int a.Qty 
-                        "@art_id", Sql.int64 (a.Id |> int64) 
+                        "@id", Sql.int64 (a.Id |> int64) 
+                        "@art_name", Sql.text a.Name
+                        "@stock", Sql.int64 (a.Stock |> int64)
                     ]
                 ) 
-            Queries.updateArticle, executions
-
-        let updateProductStatusT =
-            Queries.setProductStatusToSold, [ 
-                [ "@prd_id", Sql.int64 (product.Id |> int64) ] 
-            ]
+            insertArticleQuery, executions
 
         try
             getConnectionString()
             |> Sql.connect
             |> Sql.executeTransaction 
                 [
-                    updateArticlesT
-                    updateProductStatusT
+                    addArticlesT
                 ]
             |> fun x -> x.Length //affected rows
             |> Ok
@@ -315,6 +316,33 @@ module Data =
         with ex ->
             Error(ex.Message)
 
+    /// transactional
+    let tryAddProducts (products: Product list) =
+
+        // This query is executed n times in a single sql script
+        let addProductsT =
+            let executions =
+                products
+                |> List.map (fun p -> 
+                    [ 
+                        "@prd_name", Sql.text p.Name
+                        "@is_sold", Sql.bool false
+                    ]
+                ) 
+            insertProductQuery, executions
+
+        try
+            getConnectionString()
+            |> Sql.connect
+            |> Sql.executeTransaction 
+                [
+                    addProductsT
+                ]
+            |> fun x -> x.Length //affected rows
+            |> Ok
+
+        with ex ->
+            Error(ex.Message)
 
 
 open Suave
@@ -339,6 +367,9 @@ module Utils =
         |Ok(r) -> 
             fromWrapped(r)
         |Error(e) -> ServerErrors.INTERNAL_ERROR(e)
+
+    let ValidationError str =
+        RequestErrors.BAD_REQUEST(str)
 
     let FromWebPartOption webPartOption  = 
         match webPartOption with
@@ -372,17 +403,35 @@ module Services =
             |> JsonValue.Parse
             |> Dtos.Inventory
             
-        let domainArticles = 
+        let domainArticlesResults = 
             newInventoryDto
             |> fun x -> x.Inventory
-            |> Array.map (fun x -> Domain.Article.FromDto)
+            |> Array.map Domain.Article.FromDto
 
-        Data.addArticles(domainArticles)
+        if (domainArticlesResults |> Seq.exists (fun x -> not x.IsOk)) then
+            let firstError = 
+                domainArticlesResults
+                |> Seq.find (fun x -> not x.IsOk)
+
+            Utils.ValidationError(firstError.getError.Value)
+
+        else
+            
+            let articleList =
+                domainArticlesResults
+                |> Seq.filter (fun x -> x.IsOk)
+                |> Seq.map (fun x -> x.getOk)
+                |> Seq.choose id
+                |> Seq.toList
+
+            Data.tryAddArticles(articleList)
+            |> Utils.FromRes (fun r -> 
+                if r > 0 then
+                    OK(addArticlesJson)
+                else
+                    NO_CONTENT)
         
-        //POST should replace all (idempotent?)
-        newInventoryDto
-        |> fun x -> x.JsonValue.ToString()
-        |> Ok
+   
 
     let getProducts (httpRequest : HttpRequest) = 
         Data.getProducts()
@@ -405,20 +454,34 @@ module Services =
             |> JsonValue.Parse
             |> Dtos.Products
             
-        let productResult = 
+        let productsResult = 
             newProductsDto
             |> fun x -> x.Products
             |> Array.map Domain.Product.FromDto
 
-        let result = 
-            if productResult |> Seq.exists (fun x -> not x.IsOk) then
-                Error($"some products had errors, {1}")
-            else
-                //POST should replace all (idempotent?)
-                Ok(newProductsDto :> Dtos.Products)
+        if (productsResult |> Seq.exists (fun x -> not x.IsOk)) then
+            let firstError = 
+                productsResult
+                |> Seq.find (fun x -> not x.IsOk)
 
-        result 
-        |> Utils.FromRes(fun x -> OK(addProductsJson))
+            Utils.ValidationError(firstError.getError.Value)
+
+        else
+            
+            let productsList =
+                productsResult
+                |> Seq.filter (fun x -> x.IsOk)
+                |> Seq.map (fun x -> x.getOk)
+                |> Seq.choose id
+                |> Seq.toList
+
+            Data.tryAddProducts(productsList)
+            |> Utils.FromRes (fun r -> 
+                if r > 0 then
+                    OK(addProductsJson)
+                else
+                    NO_CONTENT)
+        
                
 
     let sellProduct (httpRequest : HttpRequest) = 
