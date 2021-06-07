@@ -26,7 +26,7 @@ VALUES (1,1,-1); --check validation
 SELECT * FROM test.products_articles;
 
 --test select product
-SELECT p.id, p.prd_name, a.art_name, pa.qty, p.is_sold
+SELECT p.id, p.prd_name, a.id, a.art_name, pa.qty, p.is_sold
 FROM test.products as p
 LEFT JOIN test.products_articles as pa
     ON pa.product_id = p.id 
