@@ -46,5 +46,6 @@ type TestApplicationFactory() =
                 let migrationStartupFilter = 
                     app.ApplicationServices.GetRequiredService<IStartupFilter>()
                     
-                !migrationStartupFilter.Configure(fun _ -> ())
+                //!migrationStartupFilter.Configure(fun _ -> ())
+                ()
             )

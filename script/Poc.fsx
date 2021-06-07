@@ -135,7 +135,7 @@ let getArticlesQuery = """SELECT id, art_name, stock FROM test.articles"""
 [<Literal>]
 let getProductsQuery =
     """SELECT
-        p.id, p.prd_name, a.art_name, pa.qty
+        p.id as prd_id, a.id as art_id, p.prd_name, a.art_name, pa.qty
     FROM test.products as p
     INNER JOIN test.products_articles as pa
         ON pa.product_id = p.id
@@ -145,7 +145,7 @@ let getProductsQuery =
 [<Literal>]
 let getProductByNameQuery = 
     """SELECT
-        p.id, p.prd_name, a.art_name, pa.qty
+        p.id as prd_id, a.id as art_id, p.prd_name, a.art_name, pa.qty
     FROM test.products as p
     INNER JOIN test.products_articles as pa
         ON pa.product_id = p.id
@@ -210,13 +210,13 @@ module Data =
         |> Sql.connect
         |> Sql.query getProductsQuery
         |> Sql.execute (fun read ->
-            let id = read.int "id"
+            let id = read.int "prd_id"
             
             { 
                 Id = id; 
                 Name =  read.text "prd_name"; 
                 Articles = [ {  
-                        Id = read.int "id"; 
+                        Id = read.int "art_id"; 
                         Qty = read.int "qty" 
                     } ]
             })
@@ -236,13 +236,13 @@ module Data =
         |> Sql.query getProductByNameQuery
         |> Sql.parameters [ "@prd_name", Sql.text productName ]
         |> Sql.execute (fun read ->
-            let id = read.int "id"
+            let id = read.int "prd_id"
             
             { 
                 Id = id; 
                 Name =  read.text "prd_name"; 
                 Articles = [ {  
-                        Id = read.int "id"; 
+                        Id = read.int "art_id"; 
                         Qty = read.int "qty" 
                     } ]
             })

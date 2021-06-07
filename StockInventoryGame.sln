@@ -6,6 +6,7 @@ MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "solution", "solution", "{9952C0BF-759A-41F8-AC72-98752574744C}"
 	ProjectSection(SolutionItems) = preProject
 		.gitignore = .gitignore
+		IDEAS.md = IDEAS.md
 		NPGSQL_FSHARP = NPGSQL_FSHARP
 		nuget.config = nuget.config
 		README.md = README.md
