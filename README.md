@@ -1,29 +1,19 @@
 ## Stock Inventory Game
 
+Set up local test db via docker run
+
 ```cli
 docker run --name localdb -e POSTGRES_PASSWORD=password -d -p 5432:5432 postgres
 ```
 
-install pgsql analyzer (see sql errors at edit time)
+install pgsql analyzer (see sql errors at edit time) , a vs extension is also available
 
 ```cli
 dotnet tool install --global Paket
 paket init
 paket add NpgsqlFSharpAnalyzer --group Analyzers
 ```
-
-This software should hold articles, and the articles should contain an identification number, a name and available stock.
-
-It should be possible to load articles into the software from a file, see the attached inventory.json.
-
-The warehouse software should also have products, products are made of different articles. Products should have a name, price and a list of articles of which they are made from with a quantity.
-
-The products should also be loaded from a file, see the attached products.json.
-
-The warehouse should have at least the following functionality:
-
-* Get all products and quantity of each that is an available with the current inventory (OK)
-* Remove(Sell) a product and update the inventory accordingly
+...
 
 ## A traditional approach (Transactional DB) - done
 
